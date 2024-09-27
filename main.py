@@ -1,4 +1,5 @@
 import asyncio
+import os
 from conva_ai import ConvaAI
 
 from scraping import scrape_multiple
@@ -6,11 +7,17 @@ from scraping import scrape_multiple
 import streamlit as st
 import plotly.graph_objects as go
 
+# Hack to get playwright to work properly
+os.system("playwright install")
+
 if not "sources" in st.session_state:
     st.session_state.sources = []
 
-if not "history" in st.session_state:
-    st.session_state.history = ""
+if not "history_1" in st.session_state:
+    st.session_state.history_1 = ""
+
+if not "history_2" in st.session_state:
+    st.session_state.history_2 = ""
 
 def get_bot_response(user_input):
     client = ConvaAI(
@@ -22,18 +29,15 @@ def get_bot_response(user_input):
     st.write("Generating URLs for the query...")
     response = client.invoke_capability_name(
         query=user_input,
-        history=st.session_state.history,
+        history=st.session_state.history_1,
         capability_name="query_generation",
         timeout=600,
         stream=False,
     )
 
-    st.session_state.history += "User: {}\nAssistant: {}{}\n\n".format(user_input, response.message, response.parameters)
+    st.session_state.history_1 += "User: {}\nAssistant: {}\n\n".format(user_input, response.message)
 
-    print(response)
-    print("\n\n")
     urls = response.parameters.get("query_urls", [])
-    print("URLs: ", urls)
 
     if urls:
         st.write("Scraping the URLs for context...")
@@ -52,12 +56,14 @@ def get_bot_response(user_input):
         response = client.invoke_capability_name(
             query=user_input,
             capability_name="data_analysis_and_visualization",
+            history=st.session_state.history_2,
             timeout=600,
             stream=False,
             capability_context=capability_context,
         )
 
-        print(response)
+        st.session_state.history_2 += "User: {}\nAssistant: {}\n\n".format(user_input, response.message)
+
         text_response = response.message
         graph_data = response.parameters.get("graph_data", {})
         return text_response, graph_data
