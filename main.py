@@ -14,10 +14,10 @@ if not "sources" in st.session_state:
     st.session_state.sources = []
 
 if not "history_1" in st.session_state:
-    st.session_state.history_1 = ""
+    st.session_state.history_1 = "{}"
 
 if not "history_2" in st.session_state:
-    st.session_state.history_2 = ""
+    st.session_state.history_2 = "{}"
 
 def get_bot_response(user_input):
     client = ConvaAI(
@@ -35,7 +35,7 @@ def get_bot_response(user_input):
         stream=False,
     )
 
-    st.session_state.history_1 += "User: {}\nAssistant: {}\n\n".format(user_input, response.message)
+    st.session_state.history_1 = response.conversation_history
 
     urls = response.parameters.get("query_urls", [])
 
@@ -62,7 +62,7 @@ def get_bot_response(user_input):
             capability_context=capability_context,
         )
 
-        st.session_state.history_2 += "User: {}\nAssistant: {}\n\n".format(user_input, response.message)
+        st.session_state.history_2 = response.conversation_history
 
         text_response = response.message
         graph_data = response.parameters.get("graph_data", {})
