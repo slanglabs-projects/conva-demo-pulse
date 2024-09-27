@@ -80,7 +80,7 @@ def generate_graph(data):
     for name, y in y_data.items():
         fig.add_trace(go.Scatter(x=x_data, y=y, mode='lines+markers', name=name))
 
-    # fig = go.Figure(data=go.Scatter(x=data['x'], y=data['y'], mode='lines+markers'))
+    fig.update_xaxes(type='category')
     fig.update_layout(
         title="Pulse Graph",
         xaxis_title=labels[0],
