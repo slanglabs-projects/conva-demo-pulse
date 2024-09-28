@@ -75,11 +75,17 @@ def get_bot_response(user_input, pb):
             fn = response.parameters.get("function")
             values = response.parameters.get("values")
             tmp = {}
-            for k, values in values.items():
+            for k, vals in values.items():
                 tmp[k] = []
-                for i, v in enumerate(values):
+                if isinstance(vals, list):
+                    for i, v in enumerate(vals):
+                        try:
+                            tmp[k].append(float(v))
+                        except (Exception,):
+                            tmp[k].append(0)
+                else:
                     try:
-                        tmp[k].append(float(v))
+                        tmp[k].append(float(vals))
                     except (Exception,):
                         tmp[k].append(0)
             ret = {}
