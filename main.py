@@ -41,7 +41,7 @@ def get_bot_response(user_input, pb):
         stream=False,
     )
 
-    print("query_generation response: {}\n\n".format(response))
+    # print("query_generation response: {}\n\n".format(response))
 
     st.session_state.history_1 = response.conversation_history
 
@@ -55,6 +55,8 @@ def get_bot_response(user_input, pb):
         for url, content in contents.items():
             context += "URL: {}\nContents: {}\n\n".format(url, content)
 
+        full_context = context
+
         pb.progress(75, "Extracting and aggregating information from the context...")
         capability_context = {"data_aggregation": context.strip()}
 
@@ -66,7 +68,7 @@ def get_bot_response(user_input, pb):
             stream=False,
             capability_context=capability_context,
         )
-        print("data_aggregation response: {}\n\n".format(response))
+        # print("data_aggregation response: {}\n\n".format(response))
         st.session_state.history_2 = response.conversation_history
 
         if response.parameters.get("function") and response.parameters.get("values"):
@@ -94,7 +96,6 @@ def get_bot_response(user_input, pb):
             ctx = "The {} of the given values is: \n".format(fn)
             for key, value in ret.items():
                 ctx += "{}: {}\n".format(key, value)
-            print(ctx)
 
             ctx += context
             context = ctx
@@ -110,7 +111,7 @@ def get_bot_response(user_input, pb):
             capability_context=capability_context,
         )
 
-        print("data_av response: {}\n\n".format(response))
+        # print("data_av response: {}\n\n".format(response))
         st.session_state.history_3 = response.conversation_history
         text_response = response.message
 
@@ -126,7 +127,7 @@ def get_bot_response(user_input, pb):
             capability_context=capability_context,
         )
 
-        print("data_v response: {}\n\n".format(response))
+        # print("data_v response: {}\n\n".format(response))
         st.session_state.history_4 = response.conversation_history
 
         graph_data = {
@@ -136,7 +137,7 @@ def get_bot_response(user_input, pb):
             "y": response.parameters.get("y_data"),
             "pie_values": response.parameters.get("pie_values"),
         }
-        return text_response, graph_data, context
+        return text_response, graph_data, full_context
     return response.message, {}, ""
 
 def generate_graph(data):
