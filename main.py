@@ -168,7 +168,10 @@ def generate_graph(data):
 
     elif type == "bar":
         for name, y in y_data.items():
-            fig.add_trace(go.Bar(x=x_data, y=y, name=name))
+            if x_data:
+                fig.add_trace(go.Bar(x=x_data, y=y, name=name))
+            elif labels:
+                fig.add_trace(go.Bar(x=labels, y=y, name=name))
             fig.update_xaxes(type='category')
             fig.update_layout(
                 title="",
