@@ -2,10 +2,18 @@ import asyncio
 import os
 from conva_ai import ConvaAI
 
-from scraping import scrape_multiple
+from scraping import fetch_multiple
 
 import streamlit as st
 import plotly.graph_objects as go
+
+DEBUG = False
+URL_TEMPLATES = {
+    "overview": "https://www.phonepe.com/pulsestatic/v1/explore-data/map/{}/hover/country/india",
+    "detailed": "https://www.phonepe.com/pulsestatic/v1/explore-data/aggregated/{}/country/india",
+    "top10": "https://www.phonepe.com/pulsestatic/v1/explore-data/top/{}/country/india",
+}
+
 
 # Hack to get playwright to work properly
 os.system("playwright install")
@@ -25,126 +33,122 @@ if not "history_3" in st.session_state:
 if not "history_4" in st.session_state:
     st.session_state.history_4 = "{}"
 
-def get_bot_response(user_input, pb):
-    client = ConvaAI(
-        assistant_id=st.secrets.conva_assistant_id,
-        api_key=st.secrets.conva_api_key,
-        assistant_version="17.0.0",
-    )
 
-    pb.progress(30, "Generating URLs for the query...")
+def make_api_calls(query, client, pb, history="{}"):
+    pb.progress(30, "Understanding the query...")
     response = client.invoke_capability_name(
-        query=user_input,
-        history=st.session_state.history_1,
-        capability_name="query_generation",
+        query=query,
+        capability_name="data_query_parsing",
+        history=history,
         timeout=600,
         stream=False,
     )
 
-    # print("query_generation response: {}\n\n".format(response))
+    if DEBUG:
+        print("data_query_parsing response: {}\n\n".format(response))
 
-    st.session_state.history_1 = response.conversation_history
+    query_type = response.parameters.get("query_type", "transaction")
+    query_subtype = response.parameters.get("query_subtype", "overview")
+    years = response.parameters.get("years", [])
+    quarters = response.parameters.get("quarters", [])
+    quarters = [quarter.replace("Q", "") if isinstance(quarter, str) else quarter for quarter in quarters]
+    quarters = [quarter.replace("q", "") if isinstance(quarter, str) else quarter for quarter in quarters]
+    quarters = ["1", "2", "3", "4"] if not quarters else quarters
+    regions = response.parameters.get("regions", [])
 
-    urls = response.parameters.get("query_urls", [])
+    urls = []
+    tmp_urls = []
+    url_template = URL_TEMPLATES.get(query_subtype).format(query_type)
+    for region in regions:
+        if "city" in region and region["city"]:
+            turl = url_template + "/state/{}".format(region.get("state").lower().replace(" ", "-"))
+            if turl not in tmp_urls:
+                tmp_urls.append(turl)
 
-    if urls:
-        pb.progress(50, "Scraping {} URLs for context... (this may take a while)".format(len(urls)))
-        contents = asyncio.run(scrape_multiple(urls))
+    if not tmp_urls:
+        tmp_urls.append(url_template)
 
-        context = ""
-        for url, content in contents.items():
-            context += "URL: {}\nContents: {}\n\n".format(url, content)
+    for year in years:
+        for quarter in quarters:
+            for turl in tmp_urls:
+                url = turl + "/{}/{}.json".format(year, quarter)
+                urls.append(url)
+    if DEBUG:
+        print("URLs: {}\n\n".format(urls))
 
-        full_context = context
+    if not urls:
+        return {}, response.conversation_history
 
-        pb.progress(75, "Extracting and aggregating information from the context...")
-        capability_context = {"data_aggregation": context.strip()}
+    pb.progress(50, "Making {} API calls... (this will take a while)".format(len(urls)))
+    contents = asyncio.run(fetch_multiple(urls))
+    return contents, response.conversation_history
 
-        response = client.invoke_capability_name(
-            query=user_input,
-            capability_name="data_aggregation",
-            history=st.session_state.history_2,
-            timeout=600,
-            stream=False,
-            capability_context=capability_context,
-        )
-        # print("data_aggregation response: {}\n\n".format(response))
-        st.session_state.history_2 = response.conversation_history
 
-        if response.parameters.get("function") and response.parameters.get("values"):
-            fn = response.parameters.get("function")
-            values = response.parameters.get("values")
-            tmp = {}
-            for k, vals in values.items():
-                tmp[k] = []
-                if isinstance(vals, list):
-                    for i, v in enumerate(vals):
-                        try:
-                            tmp[k].append(float(v))
-                        except (Exception,):
-                            tmp[k].append(0)
-                else:
-                    try:
-                        tmp[k].append(float(vals))
-                    except (Exception,):
-                        tmp[k].append(0)
-            ret = {}
-            for key, value in tmp.items():
-                if fn == "sum":
-                    ret[key] = sum(value)
-                elif fn == "average":
-                    ret[key] = sum(value) / len(value)
-                elif fn == "max":
-                    ret[key] = max(value)
-                elif fn == "min":
-                    ret[key] = min(value)
+def get_bot_response(user_input, pb):
+    client = ConvaAI(
+        assistant_id=st.secrets.conva_assistant_id,
+        api_key=st.secrets.conva_api_key,
+        assistant_version="30.0.0",
+    )
 
-            ctx = "The {} of the given values is: \n".format(fn)
-            for key, value in ret.items():
-                ctx += "{}: {}\n".format(key, value)
+    contents, history = make_api_calls(user_input, client, pb, st.session_state.history_1)
+    full_context = contents
 
-            ctx += context
-            context = ctx
+    if not contents:
+        return contents, {}, full_context
 
-        pb.progress(80, "Generating the answer...")
-        capability_context = {"data_analysis_and_visualization": context.strip()}
-        response = client.invoke_capability_name(
-            query=user_input,
-            capability_name="data_analysis_and_visualization",
-            history=st.session_state.history_3,
-            timeout=600,
-            stream=False,
-            capability_context=capability_context,
-        )
+    context = "\n".join(["{}\n{}\n{}\n\n".format(url, content, "-" * 50) for url, content in contents.items()])
+    context = context.replace("{", "{{").replace("}", "}}")
 
-        # print("data_av response: {}\n\n".format(response))
-        st.session_state.history_3 = response.conversation_history
-        text_response = response.message
+    if DEBUG:
+        print("context for data_summary = {}".format(context))
 
-        context = response.message
-        pb.progress(90, "Generating the visualization...")
-        capability_context = {"data_visualization": context.strip()}
-        response = client.invoke_capability_name(
-            query=user_input,
-            capability_name="data_visualization",
-            history=st.session_state.history_4,
-            timeout=600,
-            stream=False,
-            capability_context=capability_context,
-        )
+    st.session_state.history_1 = history
 
-        # print("data_v response: {}\n\n".format(response))
-        st.session_state.history_4 = response.conversation_history
+    pb.progress(80, "Generating the answer...")
+    capability_context = {"data_summary": context.strip()}
+    response = client.invoke_capability_name(
+        query=user_input,
+        capability_name="data_summary",
+        history=st.session_state.history_3,
+        timeout=600,
+        stream=False,
+        capability_context=capability_context,
+    )
 
-        graph_data = {
-            "type": response.parameters.get("type"),
-            "labels": response.parameters.get("labels"),
-            "x": response.parameters.get("x_data"),
-            "y": response.parameters.get("y_data"),
-            "pie_values": response.parameters.get("pie_values"),
-        }
-        return text_response, graph_data, full_context
-    return response.message, {}, ""
+    if DEBUG:
+        print("data_summary response: {}\n\n".format(response))
+
+    st.session_state.history_3 = response.conversation_history
+    text_response = response.message
+
+    context = response.message
+    pb.progress(90, "Generating the visualization...")
+    capability_context = {"data_visualization": context.strip()}
+    response = client.invoke_capability_name(
+        query=user_input,
+        capability_name="data_visualization",
+        history=st.session_state.history_4,
+        timeout=600,
+        stream=False,
+        capability_context=capability_context,
+    )
+
+    if DEBUG:
+        print("data_visualization response: {}\n\n".format(response))
+    st.session_state.history_4 = response.conversation_history
+
+    pb.progress(100, "Done")
+
+    graph_data = {
+        "type": response.parameters.get("type"),
+        "labels": response.parameters.get("labels"),
+        "x": response.parameters.get("x_data"),
+        "y": response.parameters.get("y_data"),
+        "pie_values": response.parameters.get("pie_values"),
+    }
+    return text_response, graph_data, full_context
+
 
 def generate_graph(data):
     # Create a Plotly figure
@@ -157,13 +161,13 @@ def generate_graph(data):
 
     if type == "line":
         for name, y in y_data.items():
-            fig.add_trace(go.Scatter(x=x_data, y=y, mode='lines+markers', name=name))
-            fig.update_xaxes(type='category')
+            fig.add_trace(go.Scatter(x=x_data, y=y, mode="lines+markers", name=name))
+            fig.update_xaxes(type="category")
             fig.update_layout(
                 title="",
                 xaxis_title=labels[0],
                 yaxis_title=labels[1],
-                height=400  # Adjust the height as needed
+                height=400,  # Adjust the height as needed
             )
 
     elif type == "bar":
@@ -172,22 +176,20 @@ def generate_graph(data):
                 fig.add_trace(go.Bar(x=x_data, y=y, name=name))
             elif labels:
                 fig.add_trace(go.Bar(x=labels, y=y, name=name))
-            fig.update_xaxes(type='category')
+            fig.update_xaxes(type="category")
             fig.update_layout(
                 title="",
                 xaxis_title=labels[0],
                 yaxis_title=labels[1],
-                height=400  # Adjust the height as needed
+                height=400,  # Adjust the height as needed
             )
 
     elif type == "pie":
         fig = go.Figure(data=[go.Pie(labels=labels, values=pie_values)])
-        fig.update_layout(
-            title="",
-            height=400  # Adjust the height as needed
-        )
+        fig.update_layout(title="", height=400)  # Adjust the height as needed
 
     return fig
+
 
 def main():
     st.title("PhonePe Pulse Q&A")
@@ -202,7 +204,14 @@ def main():
             st.markdown(message["content"])
             if "graph" in message:
                 st.plotly_chart(message["graph"], use_container_width=True)
-
+            if "sources" in message:
+                sources = message["sources"]
+                with st.expander("Sources"):
+                    for index, url in enumerate(sources.keys()):
+                        st.markdown(
+                            "{}. <a href='{}'>{}</a>".format(index + 1, url, url),
+                            unsafe_allow_html=True,
+                        )
     # React to user input
     if prompt := st.chat_input("What would you like to know?"):
         # Display user message in chat message container
@@ -231,11 +240,23 @@ def main():
 
             if sources:
                 with st.expander("Sources"):
-                    st.markdown(sources)
+                    for index, url in enumerate(sources.keys()):
+                        st.markdown(
+                            "{}. <a href='{}'>{}</a>".format(index + 1, url, url),
+                            unsafe_allow_html=True,
+                        )
 
         # Add assistant response to chat history
-        if graph_data.get("y"):
-            st.session_state.messages.append({"role": "assistant", "content": response, "graph": fig})
+        if graph_data.get("y" or graph_data.get("pie_values")):
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": response,
+                    "graph": fig,
+                    "sources": sources,
+                }
+            )
+
 
 if __name__ == "__main__":
     main()

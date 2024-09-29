@@ -2,9 +2,19 @@ from bs4 import BeautifulSoup
 from cacheout import lru_memoize
 from fake_useragent import UserAgent
 from playwright.async_api import async_playwright
+import requests
 import uuid
 
 import asyncio
+
+
+async def fetch(url: str, contents: dict):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        contents[url] = response.text
+    except (Exception,):
+        contents[url] = ""
 
 
 @lru_memoize()
@@ -52,5 +62,12 @@ async def scrape(url: str, contents: dict):
 async def scrape_multiple(urls):
     contents = {}
     tasks = [scrape(url, contents) for url in urls]
+    await asyncio.gather(*tasks)
+    return contents
+
+
+async def fetch_multiple(urls):
+    contents = {}
+    tasks = [fetch(url, contents) for url in urls]
     await asyncio.gather(*tasks)
     return contents
