@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from conva_ai import ConvaAI
 
@@ -32,6 +33,19 @@ if not "history_3" in st.session_state:
 
 if not "history_4" in st.session_state:
     st.session_state.history_4 = "{}"
+
+if not "related" in st.session_state:
+    st.session_state.related = []
+
+if not "new_query" in st.session_state:
+    st.session_state.new_query = None
+
+if not "started" in st.session_state:
+    st.session_state.started = False
+
+if os.path.exists("related.json"):
+    with open("related.json", "r") as f:
+        st.session_state.related = json.load(f)
 
 
 def make_api_calls(query, client, pb, history="{}"):
@@ -81,6 +95,12 @@ def make_api_calls(query, client, pb, history="{}"):
 
     pb.progress(50, "Making {} API calls... (this will take a while)".format(len(urls)))
     contents = asyncio.run(fetch_multiple(urls))
+
+    if response.related_queries:
+        st.session_state.related = response.related_queries
+        with open("related.json", "w") as f:
+            json.dump(st.session_state.related, f)
+
     return contents, response.conversation_history
 
 
@@ -191,8 +211,93 @@ def generate_graph(data):
     return fig
 
 
+st.markdown(
+    """
+<style>
+button * {
+    height: auto;
+}
+button p {
+    font-size: .8em;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+def handle_button_click(query):
+    st.session_state.new_query = query
+    if not st.session_state.started:
+        st.session_state.started = True
+
+
+def process_query(prompt):
+    # Display user message in chat message container
+    st.chat_message("user").markdown(prompt)
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+
+    # Display assistant response in chat message container
+    with st.chat_message("assistant"):
+        placeholder = st.empty()
+        _, col1, _ = placeholder.columns([1, 3, 1])
+        pb = col1.progress(0, "Understanding your query...")
+
+        # Get bot response (text and graph data)
+        response, graph_data, sources = get_bot_response(prompt, pb)
+
+        if not response:
+            response = "Sorry, I couldn't find any information on that."
+
+        placeholder.empty()
+
+        st.markdown(response)
+        if graph_data.get("y") or graph_data.get("pie_values"):
+            fig = generate_graph(graph_data)
+            st.plotly_chart(fig, use_container_width=True)
+
+        if sources:
+            with st.expander("Sources"):
+                for index, url in enumerate(sources.keys()):
+                    st.markdown(
+                        "{}. <a href='{}'>{}</a>".format(index + 1, url, url),
+                        unsafe_allow_html=True,
+                    )
+
+    # Add assistant response to chat history
+    if graph_data.get("y" or graph_data.get("pie_values")):
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": response,
+                "graph": fig,
+                "sources": sources,
+            }
+        )
+    else:
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": response,
+            }
+        )
+
+    if st.session_state.related:
+        related = sorted(st.session_state.related, key=lambda l: len(l))
+        col1, col2, col3 = st.columns(3)
+        l = len(related)
+        if l > 0:
+            col1.button(related[0], on_click=handle_button_click, args=[related[0]])
+        if l > 1:
+            col2.button(related[1], on_click=handle_button_click, args=[related[1]])
+        if l > 2:
+            col3.button(related[2], on_click=handle_button_click, args=[related[2]])
+
+
 def main():
     st.title("PhonePe Pulse Q&A")
+    st.divider()
 
     # Initialize chat history
     if "messages" not in st.session_state:
@@ -212,50 +317,29 @@ def main():
                             "{}. <a href='{}'>{}</a>".format(index + 1, url, url),
                             unsafe_allow_html=True,
                         )
+
+    if not st.session_state.started:
+        if st.session_state.related:
+            related = sorted(st.session_state.related, key=lambda l: len(l))
+            col1, col2, col3 = st.columns(3)
+            l = len(related)
+            if l > 0:
+                col1.button(related[0], on_click=handle_button_click, args=[related[0]])
+            if l > 1:
+                col2.button(related[1], on_click=handle_button_click, args=[related[1]])
+            if l > 2:
+                col3.button(related[2], on_click=handle_button_click, args=[related[2]])
+
+    if st.session_state.new_query:
+        prompt = st.session_state.new_query
+        st.session_state.new_query = None
+        process_query(prompt)
+
     # React to user input
     if prompt := st.chat_input("What would you like to know?"):
-        # Display user message in chat message container
-        st.chat_message("user").markdown(prompt)
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        # Display assistant response in chat message container
-        with st.chat_message("assistant"):
-            placeholder = st.empty()
-            _, col1, _ = placeholder.columns([1, 3, 1])
-            pb = col1.progress(0, "Understanding your query...")
-
-            # Get bot response (text and graph data)
-            response, graph_data, sources = get_bot_response(prompt, pb)
-
-            if not response:
-                response = "Sorry, I couldn't find any information on that."
-
-            placeholder.empty()
-
-            st.markdown(response)
-            if graph_data.get("y") or graph_data.get("pie_values"):
-                fig = generate_graph(graph_data)
-                st.plotly_chart(fig, use_container_width=True)
-
-            if sources:
-                with st.expander("Sources"):
-                    for index, url in enumerate(sources.keys()):
-                        st.markdown(
-                            "{}. <a href='{}'>{}</a>".format(index + 1, url, url),
-                            unsafe_allow_html=True,
-                        )
-
-        # Add assistant response to chat history
-        if graph_data.get("y" or graph_data.get("pie_values")):
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": response,
-                    "graph": fig,
-                    "sources": sources,
-                }
-            )
+        if not st.session_state.started:
+            st.session_state.started = True
+        process_query(prompt)
 
 
 if __name__ == "__main__":
