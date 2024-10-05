@@ -98,8 +98,8 @@ def make_api_calls(query, client, pb, history="{}"):
 
     if response.related_queries:
         st.session_state.related = response.related_queries
-        with open("related.json", "w") as f:
-            json.dump(st.session_state.related, f)
+        # with open("related.json", "w") as f:
+        # json.dump(st.session_state.related, f)
 
     return contents, response.conversation_history
 
@@ -288,11 +288,11 @@ def process_query(prompt):
         col1, col2, col3 = st.columns(3)
         l = len(related)
         if l > 0:
-            col1.button(related[0], on_click=handle_button_click, args=[related[0]])
+            col1.button(related[0], key="{}_1".format(related[0]), on_click=handle_button_click, args=[related[0]])
         if l > 1:
-            col2.button(related[1], on_click=handle_button_click, args=[related[1]])
+            col2.button(related[1], key="{}_2".format(related[1]), on_click=handle_button_click, args=[related[1]])
         if l > 2:
-            col3.button(related[2], on_click=handle_button_click, args=[related[2]])
+            col3.button(related[2], key="{}_3".format(related[2]), on_click=handle_button_click, args=[related[2]])
 
 
 def main():
